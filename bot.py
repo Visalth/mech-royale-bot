@@ -11,7 +11,7 @@ except Exception:
 UPGRADE_PREF = ["plating", "armor", "nanites", "gun_damage", "gun_rate", "laser_damage", "laser_charge",
                 "lightning_efficiency", "gun_velocity", "gyros", "servos", "sensors", "gun_mag",
                 "mortar_reload", "reactor", "capacitor", "jets"]
-WEAPON_PREF = {"laser": 3, "lightning": 2, "mortar": 1}
+WEAPON_PREF = {"laser": 3, "lightning": 2, "mortar": 0}
 LAG = float(os.environ.get("MF_LAG", "0"))  # extra prediction for the live test rig only; 0 in scored matches
 GHOST = os.environ.get("MF_MODE") == "ghost"  # experiment: never shoot, only survive
 DIRS = [i * math.pi / 8 for i in range(16)]
@@ -199,6 +199,13 @@ class Bot:
             n = min(npcs, key=lambda m: m["d"])
             if n["d"] < 90 and hp_frac > 0.6 and n["see"]:
                 target = n
+        if target is None and hp_frac > 0.5:
+            crates = [c for c in obs.get("crates", []) if d2(c["pos"], p) < 70]
+            if crates:
+                c = min(crates, key=lambda c: d2(c["pos"], p))
+                target = {"kind": "crate", "id": c["id"], "pos": [c["pos"][0], c["pos"][1], c["pos"][2] - 0.6],
+                          "vel": [0, 0, 0], "d": d2(c["pos"], p)}
+                target["see"] = self.los(my_eye, [c["pos"][0], c["pos"][1], c["pos"][2] + 1.2])
 
         # loot
         want_pick = None
@@ -214,7 +221,7 @@ class Bot:
                 a["take"] = pk["id"]
                 if weps[1] is not None:
                     a["drop"] = 1
-            elif dd < (130 if weps[1] is None else 70) and abs(pk["pos"][2] - p[2]) < 6 and (want_pick is None or dd < want_pick[1]):
+            elif dd < (130 if weps[1] is None else 90) and abs(pk["pos"][2] - p[2]) < 6 and (want_pick is None or dd < want_pick[1]):
                 want_pick = (pk, dd)
         cube = None
         for cb in obs.get("cubes", []):
@@ -224,8 +231,8 @@ class Bot:
 
         # how far to stay from the main threat
         enemy_light = bool(threats) and "lightning" in threats[0].get("weapons", [])
-        if "lightning" in have and hp_frac > 0.6 and not enemy_light:
-            want = (18, 38)
+        if "lightning" in have and hp_frac > 0.5:
+            want = (18, 36)
         elif enemy_light:
             want = (60, 140)
         else:
