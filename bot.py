@@ -245,9 +245,15 @@ class Bot:
         cover = hp_frac < 0.4 or any(w and w["kind"] == "gun" and w.get("reload", 0) > 0.5 for w in weps)
         if "aggro" in FLAGS and "lightning" not in have:
             want = (35, 90)
+        if "aggro2" in FLAGS and "lightning" not in have:
+            want = (20, 55)
+        if "chase" in FLAGS and target is not None and target["kind"] == "mech" and target.get("hp", 1400) < 0.4 * target.get("max_hp", 1400):
+            want = (0, 25)
+        if "nocover" in FLAGS:
+            cover = hp_frac < 0.25
         if "regen" in FLAGS:
             cover = cover or hp_frac < 0.6
-        if hp_frac < (0.25 if "aggro" in FLAGS else 0.4):
+        if hp_frac < (0.25 if FLAGS & {"aggro", "aggro2"} else 0.4):
             want = (150, 260)
         if GHOST:
             want, cover = (220, 400), True
