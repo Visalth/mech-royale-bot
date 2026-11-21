@@ -14,6 +14,11 @@ UPGRADE_PREF = ["plating", "armor", "nanites", "gun_damage", "gun_rate", "laser_
 WEAPON_PREF = {"laser": 3, "lightning": 2, "mortar": 0}
 LAG = float(os.environ.get("MF_LAG", "0"))  # extra prediction for the live test rig only; 0 in scored matches
 GHOST = os.environ.get("MF_MODE") == "ghost"  # experiment: never shoot, only survive
+FLAGS = set(os.environ.get("MF_FLAGS", "").split(","))  # experiment switches, empty in the default build
+if "dmgup" in FLAGS:
+    UPGRADE_PREF = ["gun_damage", "gun_rate", "laser_damage", "laser_charge", "lightning_efficiency",
+                    "plating", "armor", "nanites", "gun_velocity", "gyros", "servos", "sensors", "gun_mag",
+                    "mortar_reload", "reactor", "capacitor", "jets"]
 DIRS = [i * math.pi / 8 for i in range(16)]
 
 
@@ -195,11 +200,11 @@ class Bot:
         if mechs:
             near = [m for m in mechs if m["d"] < mechs[0]["d"] + 40]
             target = min(near, key=lambda m: m.get("hp", 1400) + m["d"] * 4 + (0 if m["see"] else 2500))
-        elif npcs:
+        elif npcs and "nofarm" not in FLAGS:
             n = min(npcs, key=lambda m: m["d"])
             if n["d"] < 90 and hp_frac > 0.6 and n["see"]:
                 target = n
-        if target is None and hp_frac > 0.5:
+        if target is None and hp_frac > 0.5 and "nofarm" not in FLAGS:
             crates = [c for c in obs.get("crates", []) if d2(c["pos"], p) < 70]
             if crates:
                 c = min(crates, key=lambda c: d2(c["pos"], p))
@@ -238,12 +243,20 @@ class Bot:
         else:
             want = (90, 160)
         cover = hp_frac < 0.4 or any(w and w["kind"] == "gun" and w.get("reload", 0) > 0.5 for w in weps)
-        if hp_frac < 0.4:
+        if "aggro" in FLAGS and "lightning" not in have:
+            want = (35, 90)
+        if "regen" in FLAGS:
+            cover = cover or hp_frac < 0.6
+        if hp_frac < (0.25 if "aggro" in FLAGS else 0.4):
             want = (150, 260)
         if GHOST:
             want, cover = (220, 400), True
 
         zg = self.zone_goal(obs, p)
+        if "camp" in FLAGS and weps[1] is not None and zg is not None:
+            fc, fr = self.zone_now(obs["zone"], t + 15)
+            if fr - d2(p, fc) > 40:
+                zg = None
         goal = zg
         close = threats[0]["d"] if threats else 999
         loot_ok = close > 140 or (weps[1] is None and close > 60) or (want_pick and want_pick[1] < 25 and close > 35)
@@ -276,6 +289,10 @@ class Bot:
             move = self.pick_dir(obs, me, [], goal, (0, 0), False)
         else:
             move = [0.0, 0.0]
+        if "regen" in FLAGS and not threats and hp_frac < 0.85 and me["in_zone"] and not looting:
+            fc, fr = self.zone_now(obs["zone"], t + 10)
+            if fr - d2(p, fc) > 25:
+                move = [0.0, 0.0]
         if move is None:
             move = [0.0, 0.0]
 
