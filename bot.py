@@ -51,6 +51,9 @@ class Bot:
         self.threat_yaw = None
         self.threat_until = 0.0
         self.scan = 0.0
+        self.route = None
+        self.route_t = -99.0
+        self.route_goal = None
 
     # zone
 
@@ -155,6 +158,29 @@ class Bot:
         if best is None:
             return None
         return [math.cos(best), math.sin(best)]
+
+    def nav_to(self, obs, me, goal):
+        """Next waypoint on an A* route to goal, so walls and building corners don't trap us."""
+        if not self.arena or goal is None or "nonav" in FLAGS:
+            return goal
+        p, t = me["pos"], obs["t"]
+        if d2(p, goal) < 10:
+            return goal
+        if self.route is None or t > self.route_t + 3 or d2(goal, self.route_goal) > 15:
+            self.route = self.arena.path(p, goal)
+            self.route_t, self.route_goal = t, goal
+        if not self.route:
+            return goal
+        while len(self.route) > 1 and d2(self.route[0], p) < 5:
+            self.route.pop(0)
+        wp = self.route[0]
+        for q in self.route[:10]:
+            dd = d2(q, p)
+            if dd > 32:
+                break
+            if self.arena.clear_run(p[0], p[1], p[2], math.atan2(q[1] - p[1], q[0] - p[0]), dd) >= dd - 2:
+                wp = q
+        return [wp[0], wp[1]]
 
     def shell_land(self, sh):
         g = self.cfg["weapons"]["mortar"]["gravity"]
@@ -289,10 +315,10 @@ class Bot:
             y = math.atan2(goal[1] - p[1], goal[0] - p[0])
             move = [math.cos(y), math.sin(y)]
         elif threats and me["in_zone"] and not looting:
-            move = self.pick_dir(obs, me, threats, goal, want, cover)
+            move = self.pick_dir(obs, me, threats, self.nav_to(obs, me, goal), want, cover)
             boost = (hp_frac < 0.4 or (GHOST and close < 120)) and me["energy"] > 30
         elif goal:
-            move = self.pick_dir(obs, me, [], goal, (0, 0), False)
+            move = self.pick_dir(obs, me, [], self.nav_to(obs, me, goal), (0, 0), False)
         else:
             move = [0.0, 0.0]
         if "regen" in FLAGS and not threats and hp_frac < 0.85 and me["in_zone"] and not looting:
@@ -378,4 +404,5 @@ class Bot:
         return a
 
 
-mf.run(Bot)
+if __name__ == "__main__":
+    mf.run(Bot)

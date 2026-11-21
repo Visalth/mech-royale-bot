@@ -31,6 +31,99 @@ class Arena:
         self.base = array("f", [1e9]) * n
         for p in w["prisms"]:
             self._fill(p)
+        self._build_nav()
+
+    def _build_nav(self):
+        """4 m walkability grid for ground-level path planning (buildings blocked, low bridges blocked)."""
+        k = 2
+        self.gnx, self.gny = (self.nx + k - 1) // k, (self.ny + k - 1) // k
+        self.walk = bytearray(self.gnx * self.gny)
+        for gj in range(self.gny):
+            for gi in range(self.gnx):
+                ok = 1
+                for j in range(gj * k, min(gj * k + k, self.ny)):
+                    for i in range(gi * k, min(gi * k + k, self.nx)):
+                        c = j * self.nx + i
+                        if self.top[c] - self.ground[c] > 1.5 and self.base[c] - self.ground[c] < 9:
+                            ok = 0
+                self.walk[gj * self.gnx + gi] = ok
+
+    def gcell(self, x, y):
+        gi = int((x - self.x0) / (CELL * 2))
+        gj = int((y - self.y0) / (CELL * 2))
+        return min(max(gi, 0), self.gnx - 1), min(max(gj, 0), self.gny - 1)
+
+    def gcenter(self, gi, gj):
+        return self.x0 + (gi + 0.5) * CELL * 2, self.y0 + (gj + 0.5) * CELL * 2
+
+    def path(self, a, b, limit=5000):
+        """A* over the 4 m grid from point a to point b. Returns waypoints (x, y) or None."""
+        import heapq
+        nx, walk = self.gnx, self.walk
+        si, sj = self.gcell(a[0], a[1])
+        ti, tj = self.gcell(b[0], b[1])
+        if not walk[tj * nx + ti]:
+            best = None
+            for r in range(1, 6):
+                for dj in range(-r, r + 1):
+                    for di in range(-r, r + 1):
+                        i, j = ti + di, tj + dj
+                        if 0 <= i < nx and 0 <= j < self.gny and walk[j * nx + i]:
+                            d = di * di + dj * dj
+                            if best is None or d < best[0]:
+                                best = (d, i, j)
+                if best:
+                    break
+            if not best:
+                return None
+            ti, tj = best[1], best[2]
+        start, goal = sj * nx + si, tj * nx + ti
+        if start == goal:
+            return [tuple(b[:2])]
+        steps = ((1, 0, 1.0), (-1, 0, 1.0), (0, 1, 1.0), (0, -1, 1.0),
+                 (1, 1, 1.414), (1, -1, 1.414), (-1, 1, 1.414), (-1, -1, 1.414))
+        g = {start: 0.0}
+        prev = {}
+        h = lambda i, j: math.hypot(i - ti, j - tj)
+        heap = [(h(si, sj), start)]
+        n = 0
+        found = None
+        bestn, besth = start, h(si, sj)
+        while heap and n < limit:
+            f, c = heapq.heappop(heap)
+            if c == goal:
+                found = c
+                break
+            n += 1
+            ci, cj = c % nx, c // nx
+            gc = g[c]
+            for di, dj, w in steps:
+                i, j = ci + di, cj + dj
+                if not (0 <= i < nx and 0 <= j < self.gny):
+                    continue
+                q = j * nx + i
+                if not walk[q] and q != start:
+                    continue
+                if di and dj and not (walk[cj * nx + i] and walk[j * nx + ci]):
+                    continue
+                ng = gc + w
+                if ng < g.get(q, 1e18):
+                    g[q] = ng
+                    prev[q] = c
+                    hq = h(i, j)
+                    if hq < besth:
+                        bestn, besth = q, hq
+                    heapq.heappush(heap, (ng + hq, q))
+        end = found if found is not None else bestn
+        pts = []
+        c = end
+        while c != start:
+            pts.append(self.gcenter(c % nx, c // nx))
+            c = prev[c]
+        pts.reverse()
+        if found is not None:
+            pts.append(tuple(b[:2]))
+        return pts or None
 
     def terrain(self, x, y):
         fx = (x - self.tx0) / self.tstep
